@@ -1,0 +1,111 @@
+CREATE TABLE KafkaTable (
+  `user_id` BIGINT,
+  `item_id` BIGINT,
+  `behavior` STRING,
+  `ts` TIMESTAMP(3) METADATA FROM 'timestamp'
+) WITH (
+  'connector' = 'kafka',
+  'topic' = 'user_behavior',
+  'properties.bootstrap.servers' = 'localhost:9092',
+  'properties.group.id' = 'testGroup',
+  'scan.startup.mode' = 'earliest-offset',
+  'format' = 'csv'
+)
+
+CREATE TABLE topic_db (
+  `database` STRING,
+  `table` STRING,
+  `type` STRING,
+  `ts` STRING,
+  `data` MAP<STRING, STRING>,
+  `old` MAP<STRING, STRING>,
+  proc_time as proctime()
+) WITH (
+  'connector' = 'kafka',
+  'topic' = 'topic_db',
+  'properties.bootstrap.servers' = 'hadoop102:9092',
+  'properties.group.id' = 'testGroup',
+  'scan.startup.mode' = 'latest-offset',
+  'format' = 'json'
+)
+
+
+select
+    `data`['id'] id,
+    `data`['user_id'] user_id,
+    `data`['sku_id'] sku_id,
+    `data`['appraise'] appraise,
+    `data`['comment_txt'] comment_txt,
+    ts,
+    proc_time
+from topic_db
+where `table`='comment_info' and `type`='insert'
+
+
+
+-- 在 Flink SQL 中注册 HBase 表 "mytable"
+CREATE TABLE base_dic (
+ dic_code string,
+ info ROW<dic_name string>,
+ PRIMARY KEY (dic_code) NOT ENFORCED
+) WITH (
+ 'connector' = 'hbase-2.2',
+ 'table-name' = 'xxx:dim_base_dic',
+ 'zookeeper.quorum' = 'hadoop102,hadoop103,hadoop104:2181',
+ 'lookup.async' = 'true',
+ 'lookup.cache' = 'PARTIAL',
+ 'lookup.partial-cache.max-rows' = '500',
+ 'lookup.partial-cache.expire-after-write' = '1 hour',
+ 'lookup.partial-cache.expire-after-access' = '1 hour'
+);
+
+-- enrich each order with customer information
+SELECT
+    id,
+    user_id,
+    sku_id,
+    appraise,
+    dic.dic_name appraise_name,
+    comment_txt,
+    ts
+FROM comment_info AS c
+  JOIN base_dic FOR SYSTEM_TIME AS OF c.proc_time AS dic
+    ON c.appraise = dic.dic_code;
+
+
+CREATE TABLE xxx (
+  user_region STRING,
+  pv BIGINT,
+  uv BIGINT,
+  PRIMARY KEY (user_region) NOT ENFORCED
+) WITH (
+  'connector' = 'upsert-kafka',
+  'topic' = 'xxx',
+  'properties.bootstrap.servers' = '...',
+  'key.format' = 'avro',
+  'value.format' = 'avro'
+);
+
+select
+    `data`['id'] id,
+    `data`['user_id'] user_id,
+    `data`['sku_id'] sku_id,
+    `data`['sku_num'] sku_num,
+    ts
+from topic_db
+where `table` = 'cart_info'
+and (
+    `type`='insert'
+    or
+    (`type`='update' and `old`['sku_num'] is not null and (CAST(`old`['sku_num'] AS INT) < CAST(`data`['sku_num'] AS INT)))
+)
+
+
+create table XXX (
+    id string,
+    user_id string,
+    sku_id string,
+    sku_num string,
+    ts bigint
+)
+
